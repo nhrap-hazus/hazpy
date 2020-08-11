@@ -1,5 +1,5 @@
 """
-    hazpy - Flood UDF
+    Hazus - Flood UDF
     ~~~~~
 
     FEMA developed module for analzying risk and loss from floods.
