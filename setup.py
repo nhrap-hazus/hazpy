@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="hazpy",
-    version="0.0.5",
+    version="0.0.1",
     author="James Raines, Ujvala K Sharma",
     author_email="james.rainesii@fema.dhs.gov, usharma@niyamit.com, ujvalak_in@yahoo.com",
     description="FEMA - hazpy Open-Source Library",
@@ -18,5 +18,5 @@ setuptools.setup(
         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.6',
+    python_requires='==3.7',
 )
