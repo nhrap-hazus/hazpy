@@ -7,11 +7,10 @@
 
     :copyright: © 2019 by FEMA's Natural Hazards and Risk Assesment Program.
     :license: cc, see LICENSE for more details.
-    :author: James Raines; james.rainesii@fema.dhs.gov
-    :contributors: Ujvala K Sharma; ujvalak_in@yahoo.com,usharma@niyamit.com
-    
+    :author: James Raines - james.rainesii@fema.dhs.gov
+    :contributors: Ujvala K Sharma - jvalak_in@yahoo.com, usharma@niyamit.com; Colin Lindeman - clindeman@niyamit.com
 """
-__version__ = '0.0.1.test1'
+__version__ = '0.0.1'
 __all__ = ['Tornado', 'Earthquake', 'Hurricane',
            'Tsunami', 'Flood', 'legacy', 'common', 'admin']
 
