@@ -93,24 +93,40 @@ class StudyRegion():
                 raise Exception('Method setReturnPeriod failed: Unable to set the returnPeriod.',
                                 'Reinitialize the StudyRegion class and specify the return period as one of the following: ' + str(returnPeriods))
 
-    def createConnection(self):
+    def createConnection(self, orm='pyodbc'):
         """ Creates a connection object to the local Hazus SQL Server database
 
             Key Argument:
-                orm: string -- type of connection to return (choices: 'pyodbc', 'sqlalchemy')
+                orm: string - - type of connection to return (choices: 'pyodbc', 'sqlalchemy')
             Returns:
                 conn: pyodbc connection
         """
         try:
-            comp_name = os.environ['COMPUTERNAME']
-            server = comp_name+"\HAZUSPLUSSRVR"
-            user = 'SA'
-            password = 'Gohazusplus_02'
-            driver = 'ODBC Driver 13 for SQL Server'
-            # driver = 'ODBC Driver 11 for SQL Server'
-            engine = create_engine("mssql+pyodbc:///?odbc_connect={}".format(urllib.parse.quote_plus(
-                "DRIVER={0};SERVER={1};PORT=1433;DATABASE={2};UID={3};PWD={4};TDS_Version=8.0;".format(driver, server, self.name, user, password))))
-            conn = engine.connect()
+            # list all Windows SQL Server drivers
+            drivers = [
+                '{ODBC Driver 17 for SQL Server}',
+                '{ODBC Driver 13.1 for SQL Server}',    
+                '{ODBC Driver 13 for SQL Server}',
+                '{ODBC Driver 11 for SQL Server} ',
+                '{SQL Server Native Client 11.0}',
+                '{SQL Server Native Client 10.0}',
+                '{SQL Native Client}',
+                '{SQL Server}'
+            ]
+            computer_name = os.environ['COMPUTERNAME']
+            if orm == 'pyodbc':
+                # create connection with the latest driver
+                for driver in drivers:
+                    try:
+                        conn = py.connect('Driver={d};SERVER={cn}\HAZUSPLUSSRVR; UID=SA;PWD=Gohazusplus_02'.format(
+                            d=driver, cn=computer_name))
+                        break
+                    except:
+                        continue
+            # TODO add sqlalchemy connection
+            # if orm == 'sqlalchemy':
+            #     conn = create_engine('mssql+pyodbc://SA:Gohazusplus_02@HAZUSPLUSSRVR')
+            # self.conn = conn
             return conn
         except:
             print("Unexpected error:", sys.exc_info()[0])
@@ -161,12 +177,19 @@ class StudyRegion():
                 'earthquake': """select Tract as tract, SUM(ISNULL(TotalLoss, 0)) * {c} as EconLoss from {s}.dbo.[eqTractEconLoss] group by [eqTractEconLoss].Tract""".format(s=self.name, c=constant),
                 'flood': """select CensusBlock as block, Sum(ISNULL(TotalLoss, 0))* {c} as EconLoss from {s}.dbo.flFRGBSEcLossByTotal
                     where StudyCaseId = (select StudyCaseID from {s}.[dbo].[flStudyCase] where StudyCaseName = '{sc}')
-                    and ReturnPeriodId = {rp}
+                    and ReturnPeriodId = '{rp}'
                  group by CensusBlock""".format(s=self.name, c=constant, sc=self.scenario, rp=self.returnPeriod),
-                'hurricane': """select TRACT as tract, SUM(ISNULL(TotLoss, 0)) * {c} as EconLoss from {s}.dbo.[huSummaryLoss] 
-                    where ReturnPeriod = {rp} 
-                    and huScenarioName = '{sc}'
-                    group by Tract""".format(s=self.name, c=constant, rp=self.returnPeriod, sc=self.scenario),
+                 # NOTE: huSummaryLoss will result in double economic loss. It stores results for occupancy and structure type
+                # 'hurricane': """select TRACT as tract, SUM(ISNULL(TotLoss, 0)) * {c} as EconLoss from {s}.dbo.[huSummaryLoss] 
+                #     where ReturnPeriod = '{rp} '
+                #     and huScenarioName = '{sc}'
+                #     group by Tract""".format(s=self.name, c=constant, rp=self.returnPeriod, sc=self.scenario),
+                'hurricane': """
+                    select TRACT as tract, SUM(ISNULL(Total, 0)) * {c} as EconLoss from {s}.dbo.[hv_huResultsOccAllLossT]
+                        where Return_Period = '{rp}' 
+                        and huScenarioName = '{sc}'
+                        group by Tract
+                """.format(s=self.name, c=constant, rp=self.returnPeriod, sc=self.scenario),
                 'tsunami': """select CensusBlock as block, SUM(ISNULL(TotalLoss, 0)) * {c} as EconLoss from {s}.dbo.tsuvResDelKTotB group by CensusBlock""".format(s=self.name, c=constant)
             }
 
@@ -201,7 +224,7 @@ class StudyRegion():
                         SUM(ISNULL(ContentsLoss, 0)) * {c} AS ContLoss
                         FROM [{s}].dbo.[flFRGBSEcLossBySOccup] 
                         where StudyCaseId = (select StudyCaseID from {s}.[dbo].[flStudyCase] where StudyCaseName = '{sc}')
-                        and ReturnPeriodId = {rp}
+                        and ReturnPeriodId = '{rp}'
                         GROUP BY CensusBlock
                         """.format(s=self.name, c=constant, sc=self.scenario, rp=self.returnPeriod),
                 'hurricane': """SELECT Tract AS tract,
@@ -209,14 +232,14 @@ class StudyRegion():
                         SUM(ISNULL(ModDamage, 0)) AS Minor, SUM(ISNULL(SevDamage, 0)) AS Major,
                         SUM(ISNULL(ComDamage, 0)) AS Destroyed FROM [{s}].dbo.[huSummaryDamage]
                         WHERE GenBldgOrGenOcc IN('COM', 'AGR', 'GOV', 'EDU', 'REL','RES', 'IND')
-                        and ReturnPeriod = {rp} 
+                        and ReturnPeriod = '{rp}' 
                         and huScenarioName = '{sc}'
                         GROUP BY Tract""".format(s=self.name, sc=self.scenario, rp=self.returnPeriod),
                 'tsunami': """select CBFips as block,
-                        count(case when BldgLoss/(ValStruct+ValCont) <=0.05 then 1 end) as Affected,
-                        count(case when BldgLoss/(ValStruct+ValCont) > 0.05 and BldgLoss/(ValStruct+ValCont) <=0.3 then 1 end) as Minor,
-                        count(case when BldgLoss/(ValStruct+ValCont) > 0.3 and BldgLoss/(ValStruct+ValCont) <=0.5 then 1 end) as Major,
-                        count(case when BldgLoss/(ValStruct+ValCont) >0.5 then 1 end) as Destroyed
+                        ISNULL(count(case when BldgLoss/NULLIF(ValStruct+ValCont, 0) <=0.05 then 1 end), 0) as Affected,
+                        ISNULL(count(case when BldgLoss/NULLIF(ValStruct+ValCont, 0) > 0.05 and BldgLoss/(ValStruct+ValCont) <=0.3 then 1 end), 0) as Minor,
+                        ISNULL(count(case when BldgLoss/NULLIF(ValStruct+ValCont, 0) > 0.3 and BldgLoss/(ValStruct+ValCont) <=0.5 then 1 end), 0) as Major,
+                        ISNULL(count(case when BldgLoss/NULLIF(ValStruct+ValCont, 0) >0.5 then 1 end), 0) as Destroyed
                         from (select NsiID, ValStruct, ValCont  from {s}.dbo.tsHazNsiGbs) haz
                             left join (select NsiID, CBFips from {s}.dbo.tsNsiGbs) gbs
                             on haz.NsiID = gbs.NsiID
@@ -249,16 +272,17 @@ class StudyRegion():
                 'flood': """SELECT SOccup AS Occupancy, SUM(ISNULL(TotalLoss, 0)) * {c}
                         AS TotalLoss, SUM(ISNULL(BuildingLoss, 0)) * {c} AS BldgLoss,
                         SUM(ISNULL(ContentsLoss, 0)) * {c} AS ContLoss
-                        FROM {s}.dbo.[flFRGBSEcLossBySOccup] GROUP BY SOccup
+                        FROM {s}.dbo.[flFRGBSEcLossBySOccup]
                         where StudyCaseId = (select StudyCaseID from {s}.[dbo].[flStudyCase] where StudyCaseName = '{sc}')
-                        and ReturnPeriodId = {rp}
+                        and ReturnPeriodId = '{rp}'
+                        GROUP BY SOccup
                         """.format(s=self.name, c=constant, sc=self.scenario, rp=self.returnPeriod),
                 'hurricane': """SELECT GenBldgOrGenOcc AS Occupancy,
                         SUM(ISNULL(NonDamage, 0)) As NoDamage, SUM(ISNULL(MinDamage, 0)) AS Affected,
                         SUM(ISNULL(ModDamage, 0)) AS Minor, SUM(ISNULL(SevDamage, 0)) AS Major,
                         SUM(ISNULL(ComDamage, 0)) AS Destroyed FROM {s}.dbo.[huSummaryDamage]
                         WHERE GenBldgOrGenOcc IN('COM', 'AGR', 'GOV', 'EDU', 'REL','RES', 'IND')
-                        and ReturnPeriod = {rp} 
+                        and ReturnPeriod = '{rp}'
                         and huScenarioName = '{sc}'
                         GROUP BY GenBldgOrGenOcc""".format(s=self.name, sc=self.scenario, rp=self.returnPeriod),
                 'tsunami': """SELECT LEFT({s}.dbo.tsHazNsiGbs.NsiID, 3) As Occupancy,
@@ -309,14 +333,14 @@ class StudyRegion():
                         SUM(ISNULL(BuildingLoss, 0)) * {c} AS BldgLoss, SUM(ISNULL(ContentsLoss, 0)) * {c} AS ContLoss
                         FROM {s}.dbo.[flFRGBSEcLossByGBldgType] 
                         where StudyCaseId = (select StudyCaseID from {s}.[dbo].[flStudyCase] where StudyCaseName = '{sc}')
-                        and ReturnPeriodId = {rp}
+                        and ReturnPeriodId = '{rp}'
                         GROUP BY BldgType""".format(s=self.name, c=constant, sc=self.scenario, rp=self.returnPeriod),
                 'hurricane': """SELECT GenBldgOrGenOcc AS Occupancy,
                         SUM(ISNULL(NonDamage, 0)) As NoDamage, SUM(ISNULL(MinDamage, 0)) AS Affected,
                         SUM(ISNULL(ModDamage, 0)) AS Minor, SUM(ISNULL(SevDamage, 0)) AS Major,
                         SUM(ISNULL(ComDamage, 0)) AS Destroyed FROM {s}.dbo.[huSummaryDamage]
                         WHERE GenBldgOrGenOcc IN('CONCRETE', 'MASONRY', 'STEEL', 'WOOD', 'MH')
-                        and ReturnPeriod = {rp} 
+                        and ReturnPeriod = '{rp}' 
                         and huScenarioName = '{sc}'
                         GROUP BY GenBldgOrGenOcc""".format(s=self.name, sc=self.scenario, rp=self.returnPeriod),
                 'tsunami': """SELECT eqBldgType AS BldgType, [Description],
@@ -465,10 +489,10 @@ class StudyRegion():
                 'earthquake': """select Tract as tract, SUM(DisplacedHouseholds) as DisplacedHouseholds from {s}.dbo.eqTract group by Tract""".format(s=self.name),
                 'flood': """select CensusBlock as block, SUM(DisplacedPop) as DisplacedHouseholds from {s}.dbo.flFRShelter
                     where StudyCaseId = (select StudyCaseID from {s}.[dbo].[flStudyCase] where StudyCaseName = '{sc}')
-                    and ReturnPeriodId = {rp}
+                    and ReturnPeriodId = '{rp}'
                     group by CensusBlock""".format(s=self.name, sc=self.scenario, rp=self.returnPeriod),
                 'hurricane': """select TRACT as tract, SUM(DISPLACEDHOUSEHOLDS) as DisplacedHouseholds from {s}.dbo.huShelterResultsT
-                        where Return_Period = {rp} 
+                        where Return_Period = '{rp}' 
                         and huScenarioName = '{sc}'
                     group by Tract""".format(s=self.name, sc=self.scenario, rp=self.returnPeriod),
                 'tsunami': None
@@ -496,10 +520,10 @@ class StudyRegion():
                 'earthquake': """select Tract as tract, SUM(ShortTermShelter) as ShelterNeeds from {s}.dbo.eqTract group by Tract""".format(s=self.name),
                 'flood': """select CensusBlock as block, SUM(ShortTermNeeds) as ShelterNeeds from {s}.dbo.flFRShelter
                     where StudyCaseId = (select StudyCaseID from {s}.[dbo].[flStudyCase] where StudyCaseName = '{sc}')
-                    and ReturnPeriodId = {rp}
+                    and ReturnPeriodId = '{rp}'
                     group by CensusBlock""".format(s=self.name, sc=self.scenario, rp=self.returnPeriod),
                 'hurricane': """select TRACT as tract, SUM(SHORTTERMSHELTERNEEDS) as ShelterNeeds from {s}.dbo.huShelterResultsT
-                    where Return_Period = {rp} 
+                    where Return_Period = '{rp}' 
                     and huScenarioName = '{sc}'
                      group by Tract
                         """.format(s=self.name, sc=self.scenario, rp=self.returnPeriod),
@@ -528,11 +552,11 @@ class StudyRegion():
                 'earthquake': """select Tract as tract, SUM(DebrisW) * {c} as DebrisBW, SUM(DebrisS) * {c} as DebrisCS, SUM(DebrisTotal) * {c} as DebrisTotal from {s}.dbo.eqTract group by Tract""".format(s=self.name, c=constant),
                 'flood': """select CensusBlock as block, SUM(FinishTons) * {c} as DebrisTotal from {s}.dbo.flFRDebris
                     where StudyCaseId = (select StudyCaseID from {s}.[dbo].[flStudyCase] where StudyCaseName = '{sc}')
-                    and ReturnPeriodId = {rp}
+                    and ReturnPeriodId = '{rp}'
                     group by CensusBlock""".format(s=self.name, c=constant, sc=self.scenario, rp=self.returnPeriod),
                 'hurricane': """select d.tract, d.DebrisTotal, d.DebrisBW, d.DebrisCS, d.DebrisTree, (d.DebrisTree * p.TreeCollectionFactor) as DebrisEligibleTree from
                     (select Tract as tract, SUM(BRICKANDWOOD) as DebrisBW, SUM(CONCRETEANDSTEEL) as DebrisCS, SUM(Tree) as DebrisTree, SUM(BRICKANDWOOD + CONCRETEANDSTEEL + Tree) as DebrisTotal from {s}.dbo.huDebrisResultsT
-                        where Return_Period = {rp}
+                        where Return_Period = '{rp}'
                         and huScenarioName = '{sc}'
                         group by Tract) d
                         inner join (select Tract as tract, TreeCollectionFactor from {s}.dbo.huTreeParameters) p
@@ -586,10 +610,21 @@ class StudyRegion():
         """
         try:
             hazard = self.hazard
+            # the operator controls if hazard data includes zero values ('>=' does include; '>' doesn't include)
+            # TODO operator is only part of hurricane - build operator into other hazards
+            operator = '>='
             hazardDict = {}
             if hazard == 'earthquake':
-                path = 'C:/HazusData/Regions/'+self.name+'/shape/pga.shp'
-                gdf = gpd.read_file(path)
+                try:
+                    path = 'C:/HazusData/Regions/'+self.name+'/shape/pga.shp'
+                    gdf = gpd.read_file(path)
+                except:
+                    sql = """SELECT a.tract, PARAMVALUE, geometry FROM
+                        (SELECT [Tract] as tract ,[PGA] as PARAMVALUE FROM {s}.[dbo].[eqTract]) a
+                        inner join
+                        (SELECT Tract as tract, Shape.STAsText() AS geometry FROM {s}.dbo.hzTract) b
+                        on a.tract = b.tract""".format(s=self.name)
+                    gdf = self.query(sql)
                 hazardDict['Peak Ground Acceleration (g)'] = gdf
             if hazard == 'flood':
                 # this is a list instead of a dictionary, because some of the 'name' properties are the same
@@ -669,39 +704,39 @@ class StudyRegion():
                         # Historic
                         'Historic Wind Speeds (mph)':
                         {'returnPeriod': '0',
-                            'path': "SELECT Tract as tract, PeakGust as PARAMVALUE FROM {s}.[dbo].[hv_huHistoricWindSpeedT] WHERE PeakGust > 0 AND huScenarioName = '{sc}'".format(s=self.name, sc=self.scenario)},
+                            'path': "SELECT Tract as tract, PeakGust as PARAMVALUE FROM {s}.[dbo].[hv_huHistoricWindSpeedT] WHERE PeakGust {o} 0 AND huScenarioName = '{sc}'".format(s=self.name, sc=self.scenario, o=operator)},
                         # Deterministic
                         'Wind Speeds (mph)':
-                        {'returnPeriod': '0', 'path': 'SELECT Tract as tract, PeakGust as PARAMVALUE FROM {s}.[dbo].[hv_huDeterminsticWindSpeedResults] WHERE PeakGust > 0'.format(
-                            s=self.name)},
+                        {'returnPeriod': '0', 'path': "SELECT Tract as tract, PeakGust as PARAMVALUE FROM {s}.[dbo].[hv_huDeterminsticWindSpeedResults] WHERE PeakGust {o} 0 AND huScenarioName = '{sc}'".format(
+                            s=self.name, sc=self.scenario, o=operator)},
                         # Probabilistic 10-year
                         'Wind Speeds (mph) - 10-year':
-                        {'returnPeriod': '10', 'path': 'SELECT Tract as tract, f10yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f10yr > 0'.format(
-                            s=self.name)},
+                        {'returnPeriod': '10', 'path': 'SELECT Tract as tract, f10yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f10yr {o} 0'.format(
+                            s=self.name, o=operator)},
                         # Probabilistic 20-year
                         'Wind Speeds (mph) - 20-year':
-                        {'returnPeriod': '20', 'path': 'SELECT Tract as tract, f20yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f20yr > 0'.format(
-                            s=self.name)},
+                        {'returnPeriod': '20', 'path': 'SELECT Tract as tract, f20yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f20yr {o} 0'.format(
+                            s=self.name, o=operator)},
                         # Probabilistic 50-year
                         'Wind Speeds (mph) - 50-year':
-                        {'returnPeriod': '50', 'path': 'SELECT Tract as tract, f50yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f50yr > 0'.format(
-                            s=self.name)},
+                        {'returnPeriod': '50', 'path': 'SELECT Tract as tract, f50yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f50yr {o} 0'.format(
+                            s=self.name, o=operator)},
                         # Probabilistic 100-year
                         'Wind Speeds (mph) - 100-year':
-                        {'returnPeriod': '100', 'path': 'SELECT Tract as tract, f100yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f100yr > 0'.format(
-                            s=self.name)},
+                        {'returnPeriod': '100', 'path': 'SELECT Tract as tract, f100yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f100yr {o} 0'.format(
+                            s=self.name, o=operator)},
                         # Probabilistic 200-year
                         'Wind Speeds (mph) - 200-year':
-                        {'returnPeriod': '200', 'path': 'SELECT Tract as tract, f200yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f200yr > 0'.format(
-                            s=self.name)},
+                        {'returnPeriod': '200', 'path': 'SELECT Tract as tract, f200yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f200yr {o} 0'.format(
+                            s=self.name, o=operator)},
                         # Probabilistic 500-year
                         'Wind Speeds (mph) - 500-year':
-                        {'returnPeriod': '500', 'path': 'SELECT Tract as tract, f500yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f500yr > 0'.format(
-                            s=self.name)},
+                        {'returnPeriod': '500', 'path': 'SELECT Tract as tract, f500yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f500yr {o} 0'.format(
+                            s=self.name, o=operator)},
                         # Probabilistic 1000-year
                         'Wind Speeds (mph) - 1000-year':
-                        {'returnPeriod': '1000', 'path': 'SELECT Tract as tract, f1000yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f1000yr > 0'.format(
-                            s=self.name)}
+                        {'returnPeriod': '1000', 'path': 'SELECT Tract as tract, f1000yr as PARAMVALUE FROM {s}.[dbo].[huHazardMapWindSpeed] where f1000yr {o} 0'.format(
+                            s=self.name, o=operator)}
                     }
                     for key in hazardPathDict.keys():
                         if hazardPathDict[key]['returnPeriod'] == self.returnPeriod:
@@ -775,9 +810,11 @@ class StudyRegion():
                                     FROM [syHazus].[dbo].[eqRegionScenario]
                                     WHERE RegionID = (SELECT RegionID FROM [syHazus].[dbo].[syStudyRegion]
                                         WHERE RegionName = '{s}'))""".format(s=self.name)
+            # NOTE: huTemplateScenario can contain problematic suffixes if syHazus contains duplicate named scenarios; defaulting to distinct query
             if self.hazard == 'hurricane':  # hurricane can only have one active scenario
-                sql = """SELECT [CurrentScenario] as scenarios FROM {s}.[dbo].[huTemplateScenario]""".format(
-                    s=self.name)
+                # sql = """SELECT [CurrentScenario] as scenarios FROM {s}.[dbo].[huTemplateScenario]""".format(
+                #     s=self.name)
+                sql = """select distinct(huScenarioName) as scenarios from {s}.dbo.[huSummaryLoss]""".format(s=self.name)
             if self.hazard == 'flood':  # flood can have many scenarios
                 sql = """SELECT [StudyCaseName] as scenarios FROM {s}.[dbo].[flStudyCase]""".format(
                     s=self.name)
@@ -812,7 +849,7 @@ class StudyRegion():
                 sql = """SELECT DISTINCT [Return_Period] as returnPeriod FROM {s}.[dbo].[hv_huQsrEconLoss]""".format(
                     s=self.name)
             if self.hazard == 'flood':  # TODO test if this works for UDF
-                sql = """SELECT DISTINCT [ReturnPeriodID] as returnPeriod FROM {s}.[dbo].[flAnAreaWeighted]""".format(
+                sql = """SELECT DISTINCT [ReturnPeriodID] as returnPeriod FROM {s}.[dbo].[flFRGBSEcLossByTotal]""".format(
                     s=self.name)
             if self.hazard == 'tsunami':  # selecting 0 due to no return period existing in database
                 sql = """SELECT '0' as returnPeriod FROM {s}.[dbo].[tsScenario]""".format(
@@ -820,14 +857,28 @@ class StudyRegion():
 
             queryset = self.query(sql)
             returnPeriods = list(queryset['returnPeriod'])
+            # assign as 0 if no return periods exists
             if len(returnPeriods) == 0:
                 returnPeriods.append('0')
-            try:
-                returnPeriods = [int(x) for x in returnPeriods]
-                returnPeriods.sort()
-                returnPeriods = [str(x) for x in returnPeriods]
-            except:
-                print('unable to sort return periods')
+            # Sort return periods
+            if len(returnPeriods) > 0:
+                try:
+                    # strip excess spaces
+                    returnPeriods = [x.strip() for x in returnPeriods]
+                    intPeriods = []
+                    strPeriods = []
+                    for period in returnPeriods:
+                        try:
+                            intPeriods.append(int(period))
+                        except:
+                            strPeriods.append(period)
+                    if len(intPeriods) > 0:
+                        intPeriods.sort()
+                        intPeriods = [str(x) for x in intPeriods]
+                    returnPeriods = intPeriods + strPeriods
+                except:
+                    print('unable to sort return periods')
+
             return returnPeriods
         except:
             print("Unexpected error:", sys.exc_info()[0])
@@ -900,14 +951,15 @@ class StudyRegion():
                         # limit fields to containFields
                         hzcolumns = [x for x in hzcolumns if any(
                             f in x for f in containFields)]
-                        tempColumns = [x.replace(x, '['+x+']')
-                                       for x in hzcolumns]
+                        tempColumns = [x.replace(x, '['+x+']') for x in hzcolumns]
                         tempColumns = [x.replace('[Shape]', 'Shape.STAsText() as geometry')
                                        for x in tempColumns]
                         tempColumns = [x.replace('[Statea]', '[Statea] as State')
                                        for x in tempColumns]
                         tempColumns.insert(0, '['+idColumn+'] as FacilityId')
                         hazusColumns = ', '.join(tempColumns)
+
+
 
                         # build queryset columns
                         # replace hzcolumns
@@ -919,6 +971,11 @@ class StudyRegion():
                         srcolumns = [x.replace(idColumn, 'FacilityId')
                                      for x in srcolumns]
                         srcolumns.insert(0, 'FacilityType')
+                        # rename minor/moderate/severe/complete
+                        srcolumns = [x.replace('MINOR', 'MINOR as Affected') for x in srcolumns]
+                        srcolumns = [x.replace('MODERATE', 'MODERATE as Minor') for x in srcolumns]
+                        srcolumns = [x.replace('SEVERE', 'SEVERE as Major') for x in srcolumns]
+                        srcolumns = [x.replace('COMPLETE', 'COMPLETE as Destroyed') for x in srcolumns]
                         hzcolumnsFinal = ', '.join(
                             ['hz.' + x for x in hzcolumns])
                         srcolumnsFinal = ', '.join(
@@ -934,8 +991,8 @@ class StudyRegion():
                         # build where clause
                         whereClauseDict = {
                             'earthquake': """where EconLoss > 0""",
-                            'flood': """where StudyCaseId = (select StudyCaseID from {s}.[dbo].[flStudyCase] where StudyCaseName = '{sc}') and ReturnPeriodId = {rp}""".format(s=self.name, sc=self.scenario, rp=self.returnPeriod),
-                            'hurricane': """where Return_Period = {rp} and huScenarioName = '{sc}'""".format(sc=self.scenario, rp=self.returnPeriod),
+                            'flood': """where StudyCaseId = (select StudyCaseID from {s}.[dbo].[flStudyCase] where StudyCaseName = '{sc}') and ReturnPeriodId = '{rp}'""".format(s=self.name, sc=self.scenario, rp=self.returnPeriod),
+                            'hurricane': """where Return_Period = '{rp}' and huScenarioName = '{sc}'""".format(sc=self.scenario, rp=self.returnPeriod),
                             'tsunami': """where EconLoss > 0"""
                         }
                         whereClause = whereClauseDict[self.hazard]
