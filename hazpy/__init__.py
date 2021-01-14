@@ -11,7 +11,8 @@
     :contributors: Ujvala K Sharma; ujvalak_in@yahoo.com,usharma@niyamit.com
     
 """
-__version__ = '0.0.1.test1'
+# __version__ = '0.0.1.test1'
+__version__ = '0.0.2.dev4' # updated to match conda -c nhrap-test hazpy
 __all__ = ['Tornado', 'Earthquake', 'Hurricane',
            'Tsunami', 'Flood', 'legacy', 'common', 'admin']
 
