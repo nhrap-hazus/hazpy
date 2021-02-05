@@ -1,6 +1,6 @@
   
 {% set name = "hazpy" %}
-{% set version = "0.0.1.test1" %}
+{% set version = "0.0.1" %}
 
 package:
   name: "{{ name|lower }}"
@@ -85,19 +85,16 @@ test:
     - hazpy
     - hazpy.common
     - hazpy.earthquake
-    - hazpy.earthquake.modules
     - hazpy.flood
-    - hazpy.flood.modules
     - hazpy.hurricane
-    - hazpy.hurricane.modules
     - hazpy.legacy
     - hazpy.legacy.common
     - hazpy.legacy.hazusdb
     - hazpy.legacy.studyregion
+    - hazpy.legacy.studyregiondataframe
     - hazpy.legacy.report
     - hazpy.tornado
     - hazpy.tsunami
-    - hazpy.tsunami.modules
 
 about:
   home: "https://github.com/nhrap-dev/hazpy.git"

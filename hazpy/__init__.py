@@ -12,15 +12,12 @@
     
 """
 # updated to match conda -c nhrap-test hazpy
-__version__ = '0.0.2.dev4'
-__all__ = ['Tornado', 'Earthquake', 'Hurricane',
-           'Tsunami', 'Flood', 'legacy', 'common', 'admin']
+__version__ = '0.0.1'
 
-from .earthquake import Earthquake
-from .flood import Flood
-from .hurricane import Hurricane
-from .tornado import Tornado
-from .tsunami import Tsunami
-from . import legacy
-from . import common
-from . import admin
+from .earthquake import *
+from .flood import *
+from .hurricane import *
+from .tornado import *
+from .tsunami import *
+from .legacy import *
+from .common import *
